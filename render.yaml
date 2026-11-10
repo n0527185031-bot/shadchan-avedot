@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: shadchan-avedot
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: ADMIN_KEY
+        generateValue: true
+      - key: YEMOT_TOKEN
+        sync: false

@@ -1,0 +1,22 @@
+{
+  "name": "shadchan-avedot",
+  "version": "1.0.0",
+  "description": "מערכת טלפונית לשידוך אבדות ומציאות - ימות המשיח",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "node --test --no-warnings test/*.test.js",
+    "start": "node --no-warnings src/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.22.3"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}
