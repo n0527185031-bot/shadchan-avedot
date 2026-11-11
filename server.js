@@ -15,13 +15,20 @@ app.use(express.urlencoded({ extended: true }));
 
 // הכתובת שמגדירים ב-api_link של השלוחה בימות המשיח
 app.all('/ivr', async (req, res) => {
+  const q = { ...req.query, ...req.body };
+  const started = Date.now();
   let out;
   try {
-    out = await handle({ ...req.query, ...req.body });
+    out = await handle(q);
   } catch (e) {
     console.error(e);
     out = 'id_list_message=t-אירעה תקלה נא נסו שוב מאוחר יותר&hangup=yes';
   }
+  // לוג לאבחון: השיחה (4 תווים אחרונים), ההקשה האחרונה, זמן תגובה ותחילת התשובה. בלי מספרי טלפון.
+  const keys = Object.keys(q).filter((k) => /^p\d+$/.test(k)).sort((a, b) => a.slice(1) - b.slice(1));
+  const lastKey = keys[keys.length - 1];
+  console.log(`[ivr] call=${String(q.ApiCallId || '').slice(-4)} ${lastKey ? `${lastKey}=${q[lastKey]}` : 'start'}`
+    + `${q.hangup === 'yes' ? ' hangup' : ''} ${Date.now() - started}ms -> ${String(out).slice(0, 70)}`);
   res.type('text/plain; charset=utf-8').send(out);
 });
 
