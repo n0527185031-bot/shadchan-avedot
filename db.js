@@ -17,11 +17,13 @@ function open(dbPath = cfg.DB_PATH) {
       line TEXT,                     -- מספר קו
       route_desc TEXT,               -- חברה וכיוון
       line_refs TEXT,                -- מזהי מסלול במאגר, מופרדים בפסיק
-      vehicles TEXT,                 -- מספרי רכב שאותרו, מופרדים בפסיק
+      vehicles TEXT,                 -- מספר הרכב שזוהה (או כמה מועמדים), מופרדים בפסיק
+      alt_vehicles TEXT,             -- הרכבים של הנסיעה הקודמת והבאה
+      stop_code TEXT,                -- מספר התחנה, אם המתקשר זכר
       city_key INTEGER,
       category INTEGER,
       recording TEXT,
-      notify_city INTEGER,           -- צינתוק כשהרכב נוסע בעיר הזו
+      notify_lines TEXT,             -- צינתוק כשהרכב מתחיל נסיעה: '*' = כל נסיעה, או מזהי מסלול מופרדים בפסיק
       alerts_sent INTEGER NOT NULL DEFAULT 0,
       last_alert_ride INTEGER,
       last_alert_text TEXT,
@@ -43,6 +45,11 @@ function open(dbPath = cfg.DB_PATH) {
     );
   `);
 
+  // הוספת עמודות למסד קיים מגרסה קודמת
+  for (const col of ['alt_vehicles TEXT', 'stop_code TEXT', 'notify_lines TEXT']) {
+    try { db.exec(`ALTER TABLE reports ADD COLUMN ${col}`); } catch { /* כבר קיימת */ }
+  }
+
   const minCreated = () => Date.now() - cfg.EXPIRE_DAYS * 86400000;
   const get = (id) => db.prepare('SELECT * FROM reports WHERE id=?').get(id);
 
@@ -50,13 +57,14 @@ function open(dbPath = cfg.DB_PATH) {
     raw: db,
     get,
     addReport(r) {
-      const cols = ['phone', 'kind', 'place', 'date', 'time_min', 'line', 'route_desc', 'line_refs', 'vehicles', 'city_key', 'category', 'recording'];
+      const cols = ['phone', 'kind', 'place', 'date', 'time_min', 'line', 'route_desc', 'line_refs', 'vehicles', 'alt_vehicles', 'stop_code', 'city_key', 'category', 'recording'];
       const res = db.prepare(`INSERT INTO reports (${cols.join(',')},created_at) VALUES (${cols.map(() => '?').join(',')},?)`)
         .run(...cols.map((c) => r[c] ?? null), Date.now());
       return get(Number(res.lastInsertRowid));
     },
-    setNotify(id, cityKey) {
-      db.prepare('UPDATE reports SET notify_city=? WHERE id=?').run(cityKey, id);
+    // lines: '*' או מזהי מסלול; currentRideId: הנסיעה הנוכחית של הרכב, כדי לא לצנתק עליה
+    setNotify(id, lines, currentRideId) {
+      db.prepare('UPDATE reports SET notify_lines=?, last_alert_ride=? WHERE id=?').run(lines, currentRideId ?? null, id);
     },
     candidates({ kind, place, dateFrom, dateTo, excludePhone }) {
       return db.prepare(`SELECT * FROM reports WHERE kind=? AND place=? AND status='open'
@@ -92,10 +100,10 @@ function open(dbPath = cfg.DB_PATH) {
       db.prepare(`UPDATE matches SET ${side === 'lost' ? 'seen_lost' : 'seen_found'}=1 WHERE id=?`).run(matchId);
     },
 
-    // דיווחי "איבדתי באוטובוס" שביקשו צינתוק כשהרכב בעיר שלהם
+    // דיווחי "איבדתי באוטובוס" שביקשו צינתוק כשהרכב מתחיל נסיעה חדשה
     trackable(minDate) {
       return db.prepare(`SELECT * FROM reports WHERE kind='lost' AND place='bus' AND status='open'
-        AND notify_city IS NOT NULL AND vehicles IS NOT NULL AND vehicles<>'' AND date>=? AND alerts_sent<?`)
+        AND notify_lines IS NOT NULL AND vehicles IS NOT NULL AND vehicles<>'' AND date>=? AND alerts_sent<?`)
         .all(minDate, cfg.MAX_ALERTS_PER_REPORT);
     },
     saveAlert(id, rideId, text) {

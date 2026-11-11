@@ -1,5 +1,6 @@
 // לקוח למאגר "Open Bus" של הסדנא לידע ציבורי - נתוני אוטובוסים כמעט בזמן אמת
 const cfg = require('./config');
+const { dateIL, ilToDate, addDays } = require('./time');
 
 const cache = new Map();
 const TIMEOUT_MS = 8000;
@@ -58,7 +59,7 @@ async function vehiclesAt(lineRefs, from, to) {
   return [...set];
 }
 
-// איפה הרכב עכשיו: הקו והכיוון שבהם הוא נוסע (לפי דיווח מ-15 הדקות האחרונות)
+// איפה הרכב עכשיו: באיזו נסיעה הוא נמצא (לפי דיווח מ-15 הדקות האחרונות)
 async function currentRide(vehicle) {
   const now = new Date();
   const locs = await api('/siri_vehicle_locations/list', {
@@ -70,7 +71,7 @@ async function currentRide(vehicle) {
   });
   if (!locs.length) return null;
   const loc = locs[0];
-  const day = new Date(loc.recorded_at_time).toISOString().slice(0, 10);
+  const day = dateIL(new Date(loc.recorded_at_time));
   const routes = await api('/gtfs_routes/list', {
     date_from: day, date_to: day, line_refs: loc.siri_route__line_ref, limit: 1,
   }, { cacheMin: 360 }).catch(() => []);
@@ -78,7 +79,9 @@ async function currentRide(vehicle) {
   const { from, to } = r ? parseLongName(r.route_long_name) : { from: '', to: '' };
   return {
     rideId: loc.siri_ride__id,
+    lineRef: loc.siri_route__line_ref,
     recordedAt: loc.recorded_at_time,
+    scheduledStart: loc.siri_ride__scheduled_start_time,
     line: r ? r.route_short_name : '',
     agency: r ? r.agency_name : '',
     from, to,
@@ -86,4 +89,66 @@ async function currentRide(vehicle) {
   };
 }
 
-module.exports = { findRoutes, vehiclesAt, currentRide, parseLongName, _api: api };
+// איזה קווים במספר הזה עוברים בתחנה (לפי מספר התחנה שעל השלט) בתאריך נתון.
+// מזהה לבד את החברה ואת הכיוון.
+async function routesAtStop(date, stopCode, lineNumber) {
+  const rows = await api('/gtfs_ride_stops/list', {
+    gtfs_stop__code: stopCode,
+    gtfs_route__route_short_name: lineNumber,
+    gtfs_stop__date_from: date, gtfs_stop__date_to: date,
+    gtfs_route__date_from: date, gtfs_route__date_to: date,
+    arrival_time_from: ilToDate(addDays(date, -1), 20 * 60).toISOString(),
+    arrival_time_to: ilToDate(addDays(date, 1), 6 * 60).toISOString(),
+    limit: 500,
+  }, { cacheMin: 360 });
+  const groups = new Map();
+  for (const r of rows) {
+    const { from, to } = parseLongName(r.gtfs_route__route_long_name);
+    const key = `${r.gtfs_route__agency_name}|${to}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        agency: r.gtfs_route__agency_name, from, to, line: r.gtfs_route__route_short_name,
+        stopName: r.gtfs_stop__name, lineRefs: [],
+      });
+    }
+    const g = groups.get(key);
+    if (!g.lineRefs.includes(r.gtfs_route__line_ref)) g.lineRefs.push(r.gtfs_route__line_ref);
+  }
+  return [...groups.values()];
+}
+
+// הנסיעות של הקו סביב שעת יציאה רשמית (שעון ישראל), ממוינות לפי שעה.
+// כל נסיעה: { start: Date, vehicle, rideId }
+async function ridesNear(lineRefs, date, minutes, spanMin = 120) {
+  const at = ilToDate(date, minutes);
+  const lists = await Promise.all(lineRefs.map((ref) =>
+    api('/siri_rides/list', {
+      siri_route__line_refs: ref,
+      scheduled_start_time_from: new Date(at - spanMin * 60000).toISOString(),
+      scheduled_start_time_to: new Date(+at + spanMin * 60000).toISOString(),
+      order_by: 'scheduled_start_time asc',
+      limit: 100,
+    })
+  ));
+  return lists.flat()
+    .filter((r) => r.vehicle_ref)
+    .map((r) => ({ start: new Date(r.scheduled_start_time), vehicle: String(r.vehicle_ref), rideId: r.id }))
+    .sort((a, b) => a.start - b.start);
+}
+
+// מזהה את הנסיעה לפי שעת היציאה הרשמית, ואת הנסיעות שלפניה ואחריה.
+// exact=true כשנמצאה נסיעה עד 3 דקות מהשעה שהוקשה; אחרת הנסיעה הקרובה (עד 40 דקות).
+function pickRide(rides, date, minutes) {
+  const at = +ilToDate(date, minutes);
+  let best = -1;
+  rides.forEach((r, i) => {
+    if (best < 0 || Math.abs(r.start - at) < Math.abs(rides[best].start - at)) best = i;
+  });
+  if (best < 0 || Math.abs(rides[best].start - at) > 40 * 60000) return null;
+  const main = rides[best];
+  const before = [...rides.slice(0, best)].reverse().find((r) => r.vehicle !== main.vehicle);
+  const after = rides.slice(best + 1).find((r) => r.vehicle !== main.vehicle);
+  return { main, before, after, exact: Math.abs(main.start - at) <= 3 * 60000 };
+}
+
+module.exports = { findRoutes, vehiclesAt, currentRide, routesAtStop, ridesNear, pickRide, parseLongName, _api: api };

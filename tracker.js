@@ -1,23 +1,27 @@
-// בדיקה תקופתית: האם אוטובוס שבו מישהו איבד חפץ נוסע עכשיו בעיר שלו? אם כן - צינתוק
+// בדיקה תקופתית: האם האוטובוס שבו מישהו איבד חפץ התחיל עכשיו נסיעה חדשה? אם כן - צינתוק.
+// המאבד מנתק, מתקשר חזרה, ושומע באיזה קו ובאיזו שעה האוטובוס יצא.
 const cfg = require('./config');
 const T = require('./time');
 const yemot = require('./yemot');
 const { list } = require('./match');
 
-async function checkOnce(db, openbus) {
-  const reports = db.trackable(T.addDays(T.dateIL(), -2));
+// נסיעה "התחילה עכשיו" אם שעת היציאה הרשמית שלה הייתה ב-20 הדקות האחרונות (או עוד מעט)
+const JUST_STARTED_MIN = 20;
+
+async function checkOnce(db, openbus, now = () => Date.now()) {
+  const reports = db.trackable(T.addDays(T.dateIL(new Date(now())), -2));
   let sent = 0;
   for (const r of reports) {
     const vs = list(r.vehicles);
     if (vs.length !== 1) continue; // רק כשהרכב זוהה בוודאות
     let ride;
     try { ride = await openbus.currentRide(vs[0]); } catch { continue; }
-    if (!ride || !ride.longName || ride.rideId === r.last_alert_ride) continue;
-    const city = cfg.CITIES[r.notify_city];
-    if (!ride.longName.includes(city)) continue;
-    const text = `האוטובוס נוסע עכשיו בקו ${ride.line} של ${ride.agency} מ${ride.from} ל${ride.to}`;
-    db.saveAlert(r.id, ride.rideId, text);
-    yemot.tzintuk(r.phone, `bus in ${city} report ${r.id}`);
+    if (!ride || ride.rideId === r.last_alert_ride) continue;
+    if (r.notify_lines !== '*' && !list(r.notify_lines).includes(String(ride.lineRef))) continue;
+    const startedAgo = (now() - new Date(ride.scheduledStart)) / 60000;
+    if (startedAgo > JUST_STARTED_MIN || startedAgo < -10) continue;
+    db.saveAlert(r.id, ride.rideId, `קו ${ride.line} לכיוון ${ride.to}`);
+    yemot.tzintuk(r.phone, `bus ${vs[0]} started line ${ride.line} report ${r.id}`);
     sent += 1;
   }
   return sent;
@@ -34,4 +38,4 @@ function start(db, openbus) {
   timer.unref();
 }
 
-module.exports = { start, checkOnce };
+module.exports = { start, checkOnce, JUST_STARTED_MIN };

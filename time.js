@@ -26,6 +26,23 @@ function ilToDate(dateStr, minutes) {
   return new Date(guess - off * 60000);
 }
 
+// Date -> דקות מחצות לפי שעון ישראל
+function minutesIL(d) {
+  const [h, m] = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    .format(d).split(':').map(Number);
+  return h * 60 + m;
+}
+
+// "120526" (יום, חודש, שנה) -> "2026-05-12" ; תאריך לא קיים -> null
+function parseDDMMYY(s) {
+  const m = String(s).match(/^(\d{2})(\d{2})(\d{2})$/);
+  if (!m) return null;
+  const [dd, mm, yy] = [Number(m[1]), Number(m[2]), 2000 + Number(m[3])];
+  const dt = new Date(Date.UTC(yy, mm - 1, dd));
+  if (dt.getUTCFullYear() !== yy || dt.getUTCMonth() !== mm - 1 || dt.getUTCDate() !== dd) return null;
+  return dt.toISOString().slice(0, 10);
+}
+
 // "0815" -> 495 ; לא תקין -> null
 function parseHHMM(s) {
   const m = String(s).match(/^(\d{2})(\d{2})$/);
@@ -35,4 +52,4 @@ function parseHHMM(s) {
   return h * 60 + mi;
 }
 
-module.exports = { dateIL, addDays, ilToDate, parseHHMM };
+module.exports = { dateIL, addDays, ilToDate, parseHHMM, minutesIL, parseDDMMYY };

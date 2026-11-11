@@ -11,14 +11,18 @@ function compare(L, F) {
   if (L.place === 'bus') {
     if (F.date < L.date || F.date > addDays(L.date, 1)) return null;
     const lv = list(L.vehicles), fv = list(F.vehicles);
+    // אם זה אותו יום - המציאה לא בנסיעה שיצאה הרבה לפני האבידה
+    const tooEarly = F.date === L.date && F.time_min != null && L.time_min != null && F.time_min < L.time_min - 60;
     if (lv.length && fv.length) {
-      if (!lv.some((v) => fv.includes(v))) return null;
-      // אם זה אותו יום - המציאה לא לפני האבידה (עם שעה מרווח לטעויות)
-      if (F.date === L.date && F.time_min != null && L.time_min != null && F.time_min < L.time_min - 60) return null;
-      return 'auto';
+      if (lv.some((v) => fv.includes(v))) return tooEarly ? null : 'auto';
+      // הרכב של הנסיעה הקודמת / הבאה - אולי המתקשר טעה בשעה
+      const la = [...lv, ...list(L.alt_vehicles)], fa = [...fv, ...list(F.alt_vehicles)];
+      if (la.some((v) => fa.includes(v))) return tooEarly ? null : 'suggest';
+      return null;
     }
-    // לא אותרו רכבים (תקלה במאגר / שעה לא מדויקת) - הצעה לפי קו, עיר ושעה קרובה
-    if (L.line && L.line === F.line && L.city_key === F.city_key && L.date === F.date
+    // לא אותרו רכבים (תקלה במאגר) - הצעה לפי קו ושעה קרובה (ועיר, אם ידועה לשניהם)
+    const sameCity = L.city_key == null || F.city_key == null || L.city_key === F.city_key;
+    if (L.line && L.line === F.line && sameCity && L.date === F.date
         && Math.abs((F.time_min ?? 0) - (L.time_min ?? 0)) <= 120) return 'suggest';
     return null;
   }
