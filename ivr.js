@@ -43,7 +43,7 @@ function createIvr(db, openbus, { now = () => Date.now() } = {}) {
       s.r = {};
       const parts = [...pre];
       if (!pre.length) {
-        parts.push(t('שלום וברוכים הבאים לשדכן אבדות'));
+        parts.push(t('שלום וברוכים הבאים לשדכן אבדות באוטובוסים'));
         // צינתוק "האוטובוס בעיר שלך" מהשעה האחרונה
         for (const r of db.myReports(s.phone)) {
           if (r.last_alert_at && now() - r.last_alert_at < 3600000) {
@@ -54,18 +54,14 @@ function createIvr(db, openbus, { now = () => Date.now() } = {}) {
         if (unseen) parts.push(t('יש לכם'), n(unseen), t('שידוכים חדשים לשמיעה הקישו 3'));
       }
       parts.push(
-        t('איבדתי חפץ הקישו 1'), t('מצאתי חפץ הקישו 2'),
+        t('איבדתי חפץ באוטובוס הקישו 1'), t('מצאתי חפץ באוטובוס הקישו 2'),
         t('לשמיעת השידוכים שלי הקישו 3'), t('לניהול הדיווחים שלי הקישו 4'), t('ליציאה הקישו 0')
       );
       return ask(s, 'main', (p) => tap(p, parts));
     },
-    where: (s, pre = []) => ask(s, 'where', (p) => tap(p, [...pre,
-      t(isLost(s) ? 'אם איבדתם באוטובוס הקישו 1' : 'אם מצאתם באוטובוס הקישו 1'),
-      t('ברחוב או במקום אחר הקישו 2'), t('לחזרה הקישו 0')])),
-
     // ---- אוטובוס ----
     busDate: (s, pre = []) => ask(s, 'busDate', (p) => tap(p, [...pre,
-      t(isLost(s) ? 'מתי נסעתם' : 'מתי מצאתם'), t('היום הקישו 1 אתמול הקישו 2 שלשום הקישו 3')])),
+      t(isLost(s) ? 'מתי נסעתם' : 'מתי מצאתם'), t('היום הקישו 1 אתמול הקישו 2 שלשום הקישו 3'), t('לחזרה לתפריט הראשי הקישו 0')])),
     busLine: (s, pre = []) => ask(s, 'busLine', (p) => tap(p, [...pre,
       t('הקישו את מספר הקו ובסיום סולמית')], 3, 1)),
     busCity: (s, pre = []) => ask(s, 'busCity', (p) => tap(p, [...pre,
@@ -81,12 +77,6 @@ function createIvr(db, openbus, { now = () => Date.now() } = {}) {
     busTime: (s, pre = []) => ask(s, 'busTime', (p) => tap(p, [...pre,
       t(isLost(s) ? 'הקישו בארבע ספרות את השעה בערך שבה הייתם באוטובוס' : 'הקישו בארבע ספרות את השעה בערך שבה מצאתם את החפץ'),
       t('לדוגמה לשמונה ורבע הקישו אפס שמונה אחת חמש')], 4, 4)),
-
-    // ---- רחוב ----
-    streetCat: (s, pre = []) => ask(s, 'streetCat', (p) => tap(p, [...pre, t('בחרו סוג חפץ'), t(menuText(cfg.CATEGORIES))])),
-    streetCity: (s, pre = []) => ask(s, 'streetCity', (p) => tap(p, [...pre, t('באיזו עיר'), t(menuText(cfg.CITIES))])),
-    streetDate: (s, pre = []) => ask(s, 'streetDate', (p) => tap(p, [...pre,
-      t(isLost(s) ? 'לפני כמה ימים איבדתם' : 'לפני כמה ימים מצאתם'), t('אם היום הקישו 0')], 2, 1)),
 
     record(s) {
       s.recFile = `${now()}${Math.floor(Math.random() * 1000)}`;
@@ -186,20 +176,14 @@ function createIvr(db, openbus, { now = () => Date.now() } = {}) {
   // ================= טיפול בהקשות =================
   const handlers = {
     main(s, v) {
-      if (v === '1' || v === '2') { s.r = { kind: v === '1' ? 'lost' : 'found' }; return screens.where(s); }
+      if (v === '1' || v === '2') { s.r = { kind: v === '1' ? 'lost' : 'found', place: 'bus' }; return screens.busDate(s); }
       if (v === '3') { s.list = db.myMatches(s.phone); s.idx = 0; return screens.matches(s); }
       if (v === '4') { s.list = db.myReports(s.phone); s.idx = 0; return screens.mine(s); }
       if (v === '0') return sayAndHangup([t('תודה ולהתראות')]);
       return screens.main(s, [t('בחירה לא תקינה')]);
     },
-    where(s, v) {
-      if (v === '1') { s.r.place = 'bus'; return screens.busDate(s); }
-      if (v === '2') { s.r.place = 'street'; return screens.streetCat(s); }
-      if (v === '0') return screens.main(s);
-      return screens.where(s, [t('בחירה לא תקינה')]);
-    },
-
     busDate(s, v) {
+      if (v === '0') return screens.main(s);
       if (!['1', '2', '3'].includes(v)) return screens.busDate(s, [t('בחירה לא תקינה')]);
       s.r.date = T.addDays(T.dateIL(new Date(now())), -(Number(v) - 1));
       return screens.busLine(s);
@@ -248,22 +232,6 @@ function createIvr(db, openbus, { now = () => Date.now() } = {}) {
           s.r.vehicles = vs.join(',');
         } catch (e) { console.error('vehiclesAt', e.message); }
       }
-      return screens.record(s);
-    },
-
-    streetCat(s, v) {
-      if (!cfg.CATEGORIES[v]) return screens.streetCat(s, [t('בחירה לא תקינה')]);
-      s.r.category = Number(v);
-      return screens.streetCity(s);
-    },
-    streetCity(s, v) {
-      if (!cfg.CITIES[v]) return screens.streetCity(s, [t('בחירה לא תקינה')]);
-      s.r.city_key = Number(v);
-      return screens.streetDate(s);
-    },
-    streetDate(s, v) {
-      if (!/^\d{1,2}$/.test(v) || Number(v) > 30) return screens.streetDate(s, [t('מספר לא תקין')]);
-      s.r.date = T.addDays(T.dateIL(new Date(now())), -Number(v));
       return screens.record(s);
     },
 
