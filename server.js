@@ -27,6 +27,10 @@ app.all('/ivr', async (req, res) => {
 
 app.get('/', (req, res) => res.send('שדכן אבדות - השרת פועל'));
 
+// לבדיקה איזו גרסה רצה בשרת
+const STARTED = new Date().toISOString();
+app.get('/version', (req, res) => res.json({ commit: process.env.RENDER_GIT_COMMIT || 'local', started: STARTED }));
+
 // דף ניהול: /admin?key=...
 app.get('/admin', (req, res) => {
   if (req.query.key !== cfg.ADMIN_KEY) return res.status(403).send('אין הרשאה');
